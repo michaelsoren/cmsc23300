@@ -28,76 +28,12 @@ struct workerArgs
     int socket;
 };
 
-void *accept_clients(void *args);
 void *service_single_client(void *args);
 
-int main(int argc, char *argv[])
-{
-    /* The pthread_t type is a struct representing a single thread. */
-    pthread_t server_thread;
-
-    /* If a client closes a connection, this will generally produce a SIGPIPE
-       signal that will kill the process. We want to ignore this signal, so
-       send() just returns -1 when this happens. */
-    sigset_t new;
-    sigemptyset (&new);
-    sigaddset(&new, SIGPIPE);
-    if (pthread_sigmask(SIG_BLOCK, &new, NULL) != 0) 
-    {
-        perror("Unable to mask SIGPIPE");
-        exit(-1);
-    }
-
-    /* The pthread_create function creates a new thread.
-       The first parameter is a pointer to a pthread_t variable, which we can use
-       in the remainder of the program to manage this thread.
-       The second parameter is used to specify the attributes of this new thread
-       (e.g., its stack size). We can leave it NULL here.
-       The third parameter is the function this thread will run. This function *must*
-       have the following prototype:
-
-           void *f(void *args);
-
-       Note how the function expects a single parameter of type void*. The fourth
-       parameter to pthread_create is used to specify this parameter. In this case,
-       we have no parameters to pass to the thread function, so we leave it NULL.
-       If we _do_ need to pass parameters, we will typically malloc a struct
-       with the necessary args. The thread function is typically responsible
-       for freeing this struct.
-
-       The thread we are creating here is the "server thread", which will be
-       responsible for listening on port 23300 for incoming connections. This thread,
-       in turn, will spawn threads to service each incoming connection, allowing
-       multiple clients to connect simultaneously.
-
-       Note that, in this particular example, creating a "server thread" is redundant,
-       since there will only be one server thread, and the program's main thread (the 
-           one running main()) could fulfill this purpose. */
-    if (pthread_create(&server_thread, NULL, accept_clients, NULL) < 0)
-    {
-        perror("Could not create server thread");
-        exit(-1);
-    }
-
-    pthread_join(server_thread, NULL);
-
-    pthread_exit(NULL);
-}
-
-
-/* This is the function that is run by the "server thread".
-   The socket code is similar to oneshot-single.c, except that we will
-   use getaddrinfo() to get the sockaddr (instead of creating it manually)
-   and we will use sockaddr_storage when accepting a client connection
-   (instead of using sockaddr_in, which assumes that the incoming connection
-   is coming from an IPv4 host).
-   Additionally, this function will spawn a new thread for each new client
-   connection.
-
-   See oneshot-single.c and client.c for more documentation on how the socket
-   code works.
+/* This main will handle the initial socket setup and then enter a loop
+   where it will spin off individual threads handling new connections
  */
-void *accept_clients(void *args)
+int main(int argc, char *argv[])
 {
     int serverSocket;
     int clientSocket;
@@ -114,36 +50,36 @@ void *accept_clients(void *args)
     hints.ai_flags = AI_PASSIVE; // Return my address, so I can bind() to it
 
     /* Note how we call getaddrinfo with the host parameter set to NULL */
-    if (getaddrinfo(NULL, port, &hints, &res) != 0)
+    if (getaddrinfo(NULL, port, &hints, &res) != 0) 
     {
         perror("getaddrinfo() failed");
         pthread_exit(NULL);
     }
 
-    for(p = res;p != NULL; p = p->ai_next) 
-    {
+   for (p = res; p != NULL; p = p->ai_next) 
+   {
         if ((serverSocket = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) 
-        {
+	{
             perror("Could not open socket");
             continue;
         }
 
-        if (setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1)
-        {
+        if (setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) 
+	{
             perror("Socket setsockopt() failed");
             close(serverSocket);
             continue;
         }
 
-        if (bind(serverSocket, p->ai_addr, p->ai_addrlen) == -1)
-        {
+        if (bind(serverSocket, p->ai_addr, p->ai_addrlen) == -1) 
+	{
             perror("Socket bind() failed");
             close(serverSocket);
             continue;
         }
 
-        if (listen(serverSocket, 5) == -1)
-        {
+        if (listen(serverSocket, 5) == -1) 
+	{
             perror("Socket listen() failed");
             close(serverSocket);
             continue;
@@ -154,19 +90,19 @@ void *accept_clients(void *args)
     
     freeaddrinfo(res);
 
-    if (p == NULL)
+    if (p == NULL) 
     {
         fprintf(stderr, "Could not find a socket to bind to.\n");
         pthread_exit(NULL);
     }
 
     /* Loop and wait for connections */
-    while (1)
+    while (1) 
     {
-        /* Call accept(). The thread will block until a client establishes a connection. */
+        /* Call accept(). Main thread will block until a client establishes a connection. */
         clientAddr = malloc(sinSize);
         if ((clientSocket = accept(serverSocket, (struct sockaddr *) clientAddr, &sinSize)) == -1) 
-        {
+	{
             /* If this particular connection fails, no need to kill the entire thread. */
             free(clientAddr);
             perror("Could not accept() connection");
@@ -174,7 +110,7 @@ void *accept_clients(void *args)
         }
 
         /* We're now connected to a client. We're going to spawn a "worker thread" to handle
-           that connection. That way, the server thread can continue running, accept more connections,
+           that connection. That way, the main thread can continue running, accept more connections,
             and spawn more threads to handle them. 
 
            The worker thread needs to know what socket it must use to communicate with the client,
@@ -185,8 +121,10 @@ void *accept_clients(void *args)
         wa = malloc(sizeof(struct workerArgs));
         wa->socket = clientSocket;
 
+        /* Creates the thread to service a single client.
+	*/
         if (pthread_create(&worker_thread, NULL, service_single_client, wa) != 0) 
-        {
+	{
             perror("Could not create a worker thread");
             free(clientAddr);
             free(wa);
@@ -200,6 +138,7 @@ void *accept_clients(void *args)
 }
 
 
+
 /* This is the function that is run by the "worker thread".
    It is in charge of "handling" an individual connection and, in this case
    all it will do is send a message every five seconds until the connection
@@ -208,7 +147,8 @@ void *accept_clients(void *args)
    See oneshot-single.c and client.c for more documentation on how the socket
    code works.
  */
-void *service_single_client(void *args) {
+void *service_single_client(void *args) 
+{
     struct workerArgs *wa;
     int socket, nbytes;
     char tosend[100];
@@ -225,14 +165,14 @@ void *service_single_client(void *args) {
 
     fprintf(stderr, "Socket %d connected\n", socket);
 
-    while(1)
+    while(1) 
     {
         sprintf(tosend,"%d -- Hello, socket!\n", (int) time(NULL));
 
         nbytes = send(socket, tosend, strlen(tosend), 0);
 
         if (nbytes == -1 && (errno == ECONNRESET || errno == EPIPE))
-        {
+	{
             fprintf(stderr, "Socket %d disconnected\n", socket);
             close(socket);
             free(wa);

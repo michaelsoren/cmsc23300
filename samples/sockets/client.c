@@ -74,7 +74,7 @@ int main(int argc, char *argv[])
                 printf("Unknown option\n"); exit(1);
         }
 
-    if(host == NULL || port == NULL)
+    if (host == NULL || port == NULL)
     {
         printf("USAGE: client -h HOST -p PORT\n");
         exit(1);
@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
     }
 
     /* Iterate through the list */
-    for(p = res;p != NULL; p = p->ai_next) 
+    for (p = res;p != NULL; p = p->ai_next) 
     {
         /* The list could potentially include multiple entries (e.g., if a
            hostname resolves to multiple IP addresses). Here we just pick
